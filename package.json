@@ -1,0 +1,23 @@
+{
+  "name": "board-game",
+  "version": "1.0.0",
+  "description": "Host a board game on heroku (experimental)",
+  "main": "server.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/richardl62/heroku-board-game.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/richardl62/heroku-board-game/issues"
+  },
+  "homepage": "https://github.com/richardl62/heroku-board-game#readme",
+  "dependencies": {
+    "connect": "^3.7.0",
+    "express": "^4.17.1"
+  }
+}
