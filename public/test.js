@@ -1,17 +1,27 @@
 'use strict';
-const output = document.getElementById("output");
-const number_button = document.getElementById("number-button");
-const array_button = document.getElementById("array-button");
+const number_div = document.getElementById("number");
+const plus_button = document.getElementById("plus-button");
+const minus_button = document.getElementById("minus-button");
 
-function display(obj)
+var socket = io();
+
+var number = 0;
+
+function updateBoard(move)
 {
-    output.innerText += JSON.stringify(obj) + "\n";
+    number = move;
+    number_div.innerText = "" + number;
 }
 
-function broadcast(obj)
+function makeGameMove(move)
 {
-    display(obj);
+    updateBoard(move);
+    socket.emit('game-move made', move);
 }
 
-number_button.addEventListener("click", () => broadcast(1));
-array_button.addEventListener("click", () => broadcast([1, "two"]));
+socket.on('game-move', (move) =>
+    updateBoard(move)
+);
+
+plus_button.addEventListener("click", () => makeGameMove(number + 1));
+minus_button.addEventListener("click", () => makeGameMove(number - 1));

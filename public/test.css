@@ -1,7 +1,14 @@
-#output {
-    width: 40rem;
+#number {
+    font-size: 5em;
+    font-weight: bold;
+    /* width: 40rem;
     height: 6rem;
     border: 1px #000000 solid;
-    overflow: auto;
+    overflow: auto; */
     margin-bottom: 0.5rem;
+}
+
+button {
+    font-size: 2em;
+    width:2em;
 }
