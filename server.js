@@ -3,7 +3,6 @@ var app = express();
 var http = require('http').createServer(app);
 var io = require('socket.io')(http);
 const PORT = process.env.PORT || 5000;
-
 app.use(express.static('public'));
 
 app.get('/test', function (req, res) {
