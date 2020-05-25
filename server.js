@@ -18,14 +18,19 @@ app.get('/', function (req, res) {
 
 http.listen(PORT, () => console.log(`Listening on ${ PORT }`));
 
-io.on('connection', (socket) => {
-    console.log('a user connected');
 
-    socket.on('disconnect', () => {
-        console.log('user disconnected');
-    });
+io.on('connection', (socket) => {
+    // console.log('a user connected');
 
     socket.on('game-move made', (move) => {
         socket.broadcast.emit('game-move', move);
     });
+
+    socket.on('state-change made', (state) => {;
+        socket.broadcast.emit('state-change', state);
+    });
+
+    // socket.on('disconnect', () => {
+    //     console.log('user disconnected');
+    // });
   });
