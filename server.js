@@ -22,12 +22,16 @@ http.listen(PORT, () => console.log(`Listening on ${ PORT }`));
 io.on('connection', (socket) => {
     // console.log('a user connected');
 
-    socket.on('game-move made', (move) => {
+    socket.on('game-move sent', (move) => {
         socket.broadcast.emit('game-move', move);
     });
 
-    socket.on('state-change made', (state) => {;
-        socket.broadcast.emit('state-change', state);
+    socket.on('state-change sent', (data) => {;
+        socket.broadcast.emit('state-change', data);
+    });
+
+    socket.on('chat sent', (data) => {;
+        socket.broadcast.emit('chat', data);
     });
 
     // socket.on('disconnect', () => {
