@@ -34,7 +34,5 @@ io.on('connection', (socket) => {
         socket.broadcast.emit('chat', data);
     });
 
-    // socket.on('disconnect', () => {
-    //     console.log('user disconnected');
-    // });
+    socket.on('am i connected', fn => fn()); // TEMPORARY
   });
