@@ -34,5 +34,12 @@ io.on('connection', (socket) => {
         socket.broadcast.emit('chat', data);
     });
 
-    socket.on('am i connected', fn => fn()); // TEMPORARY
+    socket.on('join-group', (options, fn) => {
+        if(options.group_id)
+        {
+            fn(options.group_id);
+        } else {
+            fn(12345678);
+        }
+    });
   });
