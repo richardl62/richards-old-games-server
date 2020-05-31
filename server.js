@@ -5,14 +5,13 @@ var app = express();
 var http = require('http').createServer(app);
 var io = require('socket.io')(http);
 const PORT = process.env.PORT || 5000;
+
+function serverError(message)
+{
+    return {server_error: message};
+}
+
 app.use(express.static('public'));
-
-app.get('/test', function (req, res) {
-
-    const file = __dirname + "/public/test.html";
-    console.log('file', file);
-    res.sendFile(file);
-});
 
 app.get('/', function (req, res) {
     res.send('Hello World!');
@@ -25,24 +24,38 @@ io.on('connection', (socket) => {
     // console.log('a player connected');
     addPlayer(socket);
 
-    socket.on('join-group', (options, sendState) => {
-        let group = joinGroup(socket);
-        sendState(group.state);
+    socket.on('join-group', (group_id, resolve) => {
+
+        assert(typeof group_id == "number", "Group ID " + group_id + " is not a number");
+        
+        let group = getGroup(group_id);
+        if(!group) {
+            resolve(serverError("Group ID " + group_id + " not recognised"));
+            return;
+        }
+        let user = getPlayer(socket);
+
+        user.joinGroup(group);
+
+        resolve(group.state);
 
         let player = getPlayer(socket);
         socket.broadcast.emit('player joined', player.name);
     });
 
-    socket.on('create-group', (state, sendConfirmation) => {
-        let group = createGroup(socket);
-        group.state = state;
+    socket.on('create-group', (game_state, resolve) => {
+        let group = new Group();
+        let user = getPlayer(socket);
 
-        sendConfirmation();
+        user.joinGroup(group);
+        group.mergeState(game_state)
+
+        resolve(group.groupId);
     });
 
     socket.on('state-change sent', (state) => {
-        let group = getPlayerGroup(socket);
-        group.state = state;
+        let player = getPlayer(socket);
+        player.group.mergeState(state);
         socket.broadcast.emit('state-change', state);
     });
 
@@ -87,7 +100,8 @@ function unusedGroupId()
     const retry_limit = 10; // arbitrary
     for(let i = 0; i < retry_limit; ++i)
     {
-        let candidate = Map.round(Math.random() * 100000000);
+        // Get 6 Digit random number
+        let candidate = Math.round(Math.random() * 1000000);
         if(!groups.has(candidate)) {
             return candidate;
         }
@@ -98,10 +112,10 @@ function unusedGroupId()
 class Group {
     constructor() {
         this.groupId = unusedGroupId();
-        groups.set(this, this.groupId);
+        groups.set(this.groupId, this);
 
         this.members = new Set; // Socket ID of members
-        this.state = null;
+        this.state = {};
     }
 
     is_member(socket) {
@@ -121,6 +135,14 @@ class Group {
 
         members.delete(socket);
     }
+
+    mergeState(state)
+    {
+        if(state) {
+            Object.assign(this.state, state); 
+            //console.log("group state:", this.state)
+        }
+    }
 }
 
 function addPlayer(socket) {
@@ -138,21 +160,15 @@ function getPlayer(socket) {
     return usr;
 }
 
-function createGroup(socket) {
-    let player = players.get(socket);
-    player.joinGroup(new Group);
+function getGroup(group_id) {
+    return groups.get(group_id);
 }
 
 function joinGroup(socket, group_id) {
     let usr = getPlayer(socket);
     let grp = getGroup(group_id);
+    assert(grp, "No group found for Group ID:" + group);
     usr.joinGroup(grp);
 }
 
-// By default, and error is thrown if the group does not exist
-function getPlayerGroup(socket, allow_null_group)
-{
-    let usr = getPlayer(socket);
-    return player.group();
-}
 
