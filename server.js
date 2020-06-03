@@ -6,10 +6,6 @@ var http = require('http').createServer(app);
 var io = require('socket.io')(http);
 const PORT = process.env.PORT || 5000;
 
-function serverError(message)
-{
-    return {server_error: message};
-}
 
 app.use(express.static('public'));
 
@@ -18,7 +14,6 @@ app.get('/', function (req, res) {
 });
 
 http.listen(PORT, () => console.log(`Listening on ${PORT}`));
-
 
 io.on('connection', (socket) => {
     // console.log('a player connected');
@@ -33,14 +28,14 @@ io.on('connection', (socket) => {
             resolve(serverError("Group ID " + group_id + " not recognised"));
             return;
         }
+
         let user = getPlayer(socket);
-
         user.joinGroup(group);
-
-        resolve(group.state);
 
         let player = getPlayer(socket);
         socket.broadcast.emit('player joined', player.name);
+
+        resolve(group.state);
     });
 
     socket.on('create-group', (game_state, resolve) => {
@@ -71,6 +66,11 @@ io.on('connection', (socket) => {
 /*
  * Consider moving stuff below to new file
  */
+
+function serverError(message)
+{
+    return {server_error: message};
+}
 
 let players = new Map; // Map socket ID to Player
 let groups = new Map; // Map group ID to Group
@@ -164,11 +164,5 @@ function getGroup(group_id) {
     return groups.get(group_id);
 }
 
-function joinGroup(socket, group_id) {
-    let usr = getPlayer(socket);
-    let grp = getGroup(group_id);
-    assert(grp, "No group found for Group ID:" + group);
-    usr.joinGroup(grp);
-}
 
 
