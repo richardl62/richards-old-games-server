@@ -16,7 +16,6 @@ app.get('/', function (req, res) {
 http.listen(PORT, () => console.log(`Listening on ${PORT}`));
 
 io.on('connection', (socket) => {
-    // console.log('a player connected');
     addPlayer(socket);
 
     socket.on('join-group', (group_id, resolve) => {
@@ -33,7 +32,7 @@ io.on('connection', (socket) => {
         user.joinGroup(group);
 
         let player = getPlayer(socket);
-        socket.broadcast.emit('player joined', player.name);
+        player.broadcastToGroup('player joined', player.name);
 
         resolve(group.state);
     });
@@ -51,15 +50,17 @@ io.on('connection', (socket) => {
     socket.on('state-change sent', (state) => {
         let player = getPlayer(socket);
         player.group.mergeState(state);
-        socket.broadcast.emit('state-change', state);
+        player.broadcastToGroup('state-change', state);
     });
 
     socket.on('game-move sent', (move) => {
-        socket.broadcast.emit('game-move', move);
+        let player = getPlayer(socket);
+        player.broadcastToGroup('game-move', move);
     });
 
     socket.on('chat sent', (data) => {
-        socket.broadcast.emit('chat', data);
+        let player = getPlayer(socket);
+        player.broadcastToGroup('chat', data);
     });
 });
 
@@ -83,16 +84,29 @@ function assert(condition, message)
 }
 
 class Player {
-    construtor() {
+    constructor(socket) {
+        assert(socket);
+    
         this.group = null;
         this.name = null;
+        this.socket = socket;
     }
 
     joinGroup(group)
     {
         this.group = group;
         this.name = "Player " + (group.members.length + 1);
+    
+        this.socket.join(this.group.room());
     }
+
+    broadcastToGroup(...args) {
+        console.log("broadcast arguments:", ...args);
+
+        const room = this.group.room();
+        let emit = this.socket.broadcast.to(room).emit(...args);
+    }
+
 }
 
 function unusedGroupId()
@@ -118,30 +132,15 @@ class Group {
         this.state = {};
     }
 
-    is_member(socket) {
-        return this.members.has(socket);
-    }
-
-    add_member(socket) {
-        if (this.is_member(socket)) {
-            throw Error`{socket_id} is aleady a group member`;
-        }
-    }
-
-    remove_member(socket) {
-        if (!this.is_member(socket)) {
-            throw Error`{socket_id} is not a group member`;
-        }
-
-        members.delete(socket);
-    }
-
     mergeState(state)
     {
         if(state) {
             Object.assign(this.state, state); 
-            //console.log("group state:", this.state)
         }
+    }
+
+    room() {
+        return 'room' + this.groupId;
     }
 }
 
@@ -149,15 +148,17 @@ function addPlayer(socket) {
     if (players.has(socket)) {
         throw Error("Attempt to re-add existing player");
     }
-    players.set(socket, new Player);
+
+    let p = new Player(socket);
+    assert(p.socket);
+    players.set(socket, p);
 }
 
 function getPlayer(socket) {
-    let usr = players.get(socket);
-    if (!usr) {
-        throw Error("Unknown player");
-    }
-    return usr;
+    let player = players.get(socket);
+    assert(player);
+    assert(player.socket);
+    return player;
 }
 
 function getGroup(group_id) {
