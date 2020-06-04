@@ -20,48 +20,51 @@ io.on('connection', (socket) => {
 
     socket.on('join-group', (group_id, resolve) => {
 
-        assert(typeof group_id == "number", "Group ID " + group_id + " is not a number");
+        assert(typeof group_id == "number");
         
         let group = getGroup(group_id);
         if(!group) {
-            resolve(serverError("Group ID " + group_id + " not recognised"));
+            resolve(socket.id, serverError("Group ID " + group_id + " not recognised"));
             return;
         }
 
-        let user = getPlayer(socket);
-        user.joinGroup(group);
-
         let player = getPlayer(socket);
-        player.broadcastToGroup('player joined', player.name);
+        player.joinGroup(group);
 
-        resolve(group.state);
+        player.broadcastToGroup('player joined');
+
+        resolve({player_id: player, state: group.state});
     });
 
     socket.on('create-group', (game_state, resolve) => {
         let group = new Group();
-        let user = getPlayer(socket);
+        let player = getPlayer(socket);
 
-        user.joinGroup(group);
+        player.joinGroup(group);
         group.mergeState(game_state)
 
-        resolve(group.groupId);
+        console.log(`player ${player.id} joined new group ${group.id()}`)
+        resolve({player_id: player.id, group: group.id()});
     });
 
-    socket.on('state-change sent', (state) => {
+    socket.on('state-change', (state) => {
         let player = getPlayer(socket);
+        assert(player);
+        assert(player.group);
         player.group.mergeState(state);
-        player.broadcastToGroup('state-change', state);
+        player.broadcastToGroup('state-change',state);
     });
 
-    socket.on('game-move sent', (move) => {
+    socket.on('game-move', (move) => {
         let player = getPlayer(socket);
         player.broadcastToGroup('game-move', move);
     });
 
-    socket.on('chat sent', (data) => {
-        let player = getPlayer(socket);
-        player.broadcastToGroup('chat', data);
-    });
+    // socket.on('disconnect', () => {
+    //     let player = getPlayer(socket);
+    //     player.broadcastToGroup('left group');
+    //     removePlayer(player);
+    // });
 });
 
 /*
@@ -83,13 +86,27 @@ function assert(condition, message)
     }
 }
 
+var next_player_id = 1;
+function get_player_id() {
+    ++next_player_id;
+
+    if (next_player_id == Number.MAX_SAFE_INTEGER) { // Almost certainly unnecessary
+        console.log("next_player_id reached MAX_SAFE_INTEGER!!!");
+        next_player_id = 1;
+    }
+
+    return next_player_id;
+}
+
 class Player {
     constructor(socket) {
         assert(socket);
-    
+
         this.group = null;
         this.name = null;
         this.socket = socket;
+
+        this.id = get_player_id();
     }
 
     joinGroup(group)
@@ -101,12 +118,9 @@ class Player {
     }
 
     broadcastToGroup(...args) {
-        console.log("broadcast arguments:", ...args);
-
         const room = this.group.room();
-        let emit = this.socket.broadcast.to(room).emit(...args);
+        this.socket.broadcast.to(room).emit(this.id, ...args);
     }
-
 }
 
 function unusedGroupId()
@@ -125,8 +139,8 @@ function unusedGroupId()
 
 class Group {
     constructor() {
-        this.groupId = unusedGroupId();
-        groups.set(this.groupId, this);
+        this.m_id = unusedGroupId();
+        groups.set(this.m_id, this);
 
         this.members = new Set; // Socket ID of members
         this.state = {};
@@ -139,8 +153,16 @@ class Group {
         }
     }
 
+    id() {
+        return this.m_id;
+    }
     room() {
-        return 'room' + this.groupId;
+        return 'room' + this.id();
+    }
+
+    // Return array of players in this group (ineffient)
+    players() {
+        players.values().filter(p => p.id() == this.id());
     }
 }
 
@@ -152,6 +174,26 @@ function addPlayer(socket) {
     let p = new Player(socket);
     assert(p.socket);
     players.set(socket, p);
+}
+
+function removePlayer(pp) {
+    assert(p.socket);
+
+    if (players.has(p.socket)) {
+        throw Error("Attempt to remove unregistered player");
+    }
+
+    players.remove(socket);
+
+    // Check if the group is still in use (inefficient)
+    let n_left = player.group.players().length;
+
+    console.log(n_left + " players left in group "
+        + players.group.id());
+
+    if (n_left == 0) {
+        players.remove(player.group.id());
+    }
 }
 
 function getPlayer(socket) {
