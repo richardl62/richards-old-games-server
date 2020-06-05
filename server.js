@@ -16,73 +16,78 @@ app.get('/', function (req, res) {
 http.listen(PORT, () => console.log(`Listening on ${PORT}`));
 
 io.on('connection', (socket) => {
-    addPlayer(socket);
 
-    socket.on('join-group', (group_id, resolve) => {
+    socket.on('join-group', (group_id, state, resolve) => {
+        let group;
+        if (group_id) {
+            assert(typeof group_id == "number", "invalid group_id");
+            group = getGroup(group_id);
+        } else {
+            group = new Group;
+        }
 
-        assert(typeof group_id == "number");
-        
-        let group = getGroup(group_id);
-        if(!group) {
-            resolve(socket.id, serverError("Group ID " + group_id + " not recognised"));
+        if (!group) {
+            console.log('Could not join group ' + group_id)
+            resolve(serverError('Could not join group ' + group_id));
             return;
         }
 
-        let player = getPlayer(socket);
-        player.joinGroup(group);
+        group.mergeState(state);
 
+
+        let player = new Player(socket, group);
         player.broadcastToGroup('player joined');
 
-        resolve({player_id: player, state: group.state});
+        resolve({
+            player_id: player.id(),
+            group_id: group.id(),
+            group_state: group.state()
+        });
     });
 
-    socket.on('create-group', (game_state, resolve) => {
-        let group = new Group();
+    socket.on('disconnect', data => {
+        let player = getPlayerUnchecked(socket);
+        if (player) {
+            player.broadcastToGroup('player left');
+            deletePlayer(player);
+        }
+    });
+
+    socket.on('state', data => {
         let player = getPlayer(socket);
+        player.group().mergeState(data);
 
-        player.joinGroup(group);
-        group.mergeState(game_state)
-
-        console.log(`player ${player.id} joined new group ${group.id()}`)
-        resolve({player_id: player.id, group: group.id()});
+        player.broadcastToGroup('state', {
+            state: data,
+        });
     });
 
-    socket.on('state-change', (state) => {
+    socket.on('transcient', data => {
         let player = getPlayer(socket);
-        assert(player);
-        assert(player.group);
-        player.group.mergeState(state);
-        player.broadcastToGroup('state-change',state);
+        player.broadcastToGroup('transcient', {
+            transcient: data,
+        });
     });
-
-    socket.on('game-move', (move) => {
-        let player = getPlayer(socket);
-        player.broadcastToGroup('game-move', move);
-    });
-
-    // socket.on('disconnect', () => {
-    //     let player = getPlayer(socket);
-    //     player.broadcastToGroup('left group');
-    //     removePlayer(player);
-    // });
-});
+})
 
 /*
  * Consider moving stuff below to new file
  */
+
+
+let players = new Map; // Map socket ID to Player
+let groups = new Map; // Map group ID to Group
 
 function serverError(message)
 {
     return {server_error: message};
 }
 
-let players = new Map; // Map socket ID to Player
-let groups = new Map; // Map group ID to Group
-
-function assert(condition, message)
-{
-    if(!condition) {
-        throw Error("Assertion failed: " + message);
+function assert(condition, message) {
+    if (!condition) {
+        let err = Error("Assertion failed: " + message);
+        console.log(err);
+        throw err;
     }
 }
 
@@ -99,38 +104,64 @@ function get_player_id() {
 }
 
 class Player {
-    constructor(socket) {
-        assert(socket);
+    constructor(socket, group) {
+        assert(socket, "Socket not supplied");
+        assert(group instanceof Group, "Invalid group");
 
-        this.group = null;
-        this.name = null;
-        this.socket = socket;
+        this.m_socket = socket;
+        this.m_group = group;
+        this.m_socket.join(group.room());
 
-        this.id = get_player_id();
+        this.m_id = get_player_id();
+
+        assert(!players.has(socket),
+            "Player aleady assigned to socket");
+        players.set(socket, this);
     }
 
-    joinGroup(group)
-    {
-        this.group = group;
-        this.name = "Player " + (group.members.length + 1);
-    
-        this.socket.join(this.group.room());
+    id() {
+        return this.m_id;
     }
 
-    broadcastToGroup(...args) {
-        const room = this.group.room();
-        this.socket.broadcast.to(room).emit(this.id, ...args);
+    group() {
+        return this.m_group;
+    }
+
+    socket() {
+        return this.m_socket;
+    }
+
+    broadcastToGroup(channel, data) {
+        if (data == undefined) {
+            data = {};
+        }
+        assert(typeof data == "object");
+        data.player_id = this.id();
+        const room = this.group().room();
+        this.socket().broadcast.to(room).emit(channel, data);
     }
 }
 
-function unusedGroupId()
-{
+function deletePlayer(player) {
+    console.log("Deleting player " + player.id());
+    let group = player.group();
+
+    assert(players.has(player.socket()))
+    players.delete(player.socket());
+
+    if(group.members().length == 0) {
+        console.log("Deleting group ", group.id());
+        groups.delete(group.id());
+    }
+}
+
+// Generate 6 digit random ID which is not already in use.
+function unusedGroupId() {
+    // Implementation is a kludge.
     const retry_limit = 10; // arbitrary
-    for(let i = 0; i < retry_limit; ++i)
-    {
-        // Get 6 Digit random number
+    for (let i = 0; i < retry_limit; ++i) {
         let candidate = Math.round(Math.random() * 1000000);
-        if(!groups.has(candidate)) {
+        if (!groups.has(candidate)) {
             return candidate;
         }
     }
@@ -140,66 +171,45 @@ function unusedGroupId()
 class Group {
     constructor() {
         this.m_id = unusedGroupId();
+        console.log("Adding group ", this.m_id);
         groups.set(this.m_id, this);
 
-        this.members = new Set; // Socket ID of members
-        this.state = {};
+        this.m_state = {};
     }
 
-    mergeState(state)
-    {
-        if(state) {
-            Object.assign(this.state, state); 
+    mergeState(state) {
+        if (state) {
+            Object.assign(this.m_state, state);
         }
     }
 
     id() {
         return this.m_id;
     }
+
+    state() {
+        return this.m_state;
+    }
+
     room() {
         return 'room' + this.id();
     }
 
     // Return array of players in this group (ineffient)
-    players() {
-        players.values().filter(p => p.id() == this.id());
+    members() {
+        let player_array = new Array(...players.values())
+        return player_array.filter(p => p.group() == this);
     }
 }
 
-function addPlayer(socket) {
-    if (players.has(socket)) {
-        throw Error("Attempt to re-add existing player");
-    }
-
-    let p = new Player(socket);
-    assert(p.socket);
-    players.set(socket, p);
+function getPlayerUnchecked(socket) {
+    return players.get(socket);
 }
-
-function removePlayer(pp) {
-    assert(p.socket);
-
-    if (players.has(p.socket)) {
-        throw Error("Attempt to remove unregistered player");
-    }
-
-    players.remove(socket);
-
-    // Check if the group is still in use (inefficient)
-    let n_left = player.group.players().length;
-
-    console.log(n_left + " players left in group "
-        + players.group.id());
-
-    if (n_left == 0) {
-        players.remove(player.group.id());
-    }
-}
-
 function getPlayer(socket) {
-    let player = players.get(socket);
-    assert(player);
-    assert(player.socket);
+    let player = getPlayerUnchecked(socket);
+    assert(player, "Player not found");
+    assert(player.group(), "Player does not have group");
+    assert(player.id(), "Player does not have id");
     return player;
 }
 
