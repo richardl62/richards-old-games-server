@@ -53,19 +53,13 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('state', data => {
+    socket.on('data', (state, info) => {
         let player = getPlayer(socket);
-        player.group().mergeState(data);
+        player.group().mergeState(state);
 
-        player.broadcastToGroup('state', {
-            state: data,
-        });
-    });
-
-    socket.on('transcient', data => {
-        let player = getPlayer(socket);
-        player.broadcastToGroup('transcient', {
-            transcient: data,
+        player.broadcastToGroup('data', {
+            state: state,
+            info: info,
         });
     });
 })
