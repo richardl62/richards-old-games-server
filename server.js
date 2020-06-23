@@ -4,16 +4,40 @@ var express = require('express');
 var app = express();
 var http = require('http').createServer(app);
 var io = require('socket.io')(http);
+var bodyParser = require('body-parser');
+
 const PORT = process.env.PORT || 5000;
+
+http.listen(PORT, () => console.log(`Listening on ${PORT}`));
+
+app.use(bodyParser.urlencoded({ extended: false }))
+app.use(bodyParser.json())
 
 app.use(function(req, res, next) {
     res.header("Access-Control-Allow-Origin", "*"); // Bad for security!!!
+    res.header("Access-Control-Allow-Headers", "*"); // Bad for security!!!
+    
     next();
   });
 
 app.use(express.static('public'));
 
-http.listen(PORT, () => console.log(`Listening on ${PORT}`));
+
+app.get('/open-games', function (req, res) {
+    let data = []; 
+    for(let [id,game] of games) {
+        data.push([id,game.type()]);
+    }
+    res.json(data);
+});
+
+app.post('/start-game', function (req, res) {
+    const id = req.body.id;
+    const game = req.body.game;
+
+    let st_res = startGame(id,game);
+    res.json(st_res);
+});
 
 io.on('connection', (socket) => {
 
@@ -163,12 +187,13 @@ function unusedGameId() {
 }
 
 class Game {
-    constructor() {
-        this.m_id = unusedGameId();
-        console.log("Adding game ", this.m_id);
-        games.set(this.m_id, this);
-
+    constructor(id, type) {
+        assert(id && type);
+        this.m_id = id;
+        this.m_type = type;
         this.m_state = {};
+
+        games.set(id, this);
     }
 
     mergeState(state) {
@@ -179,6 +204,10 @@ class Game {
 
     id() {
         return this.m_id;
+    }
+
+    type() {
+        return this.m_type;
     }
 
     state() {
@@ -207,8 +236,17 @@ function getPlayer(socket) {
     return player;
 }
 
-function getGame(game_id) {
-    return games.get(game_id);
+function startGame(id, game) {
+    if(!id || !game) {
+        return Error("id and/or game are not defined");
+    }
+
+    if(games.has(id)) {
+        return Error(`game "${id}" already exists`);
+    }
+
+    new Game(id, game);
+    return true;
 }
 
 
