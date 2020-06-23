@@ -6,58 +6,58 @@ var http = require('http').createServer(app);
 var io = require('socket.io')(http);
 const PORT = process.env.PORT || 5000;
 
+app.use(function(req, res, next) {
+    res.header("Access-Control-Allow-Origin", "*"); // Bad for security!!!
+    next();
+  });
 
 app.use(express.static('public'));
-
-app.get('/', function (req, res) {
-    res.send('Hello World!');
-});
 
 http.listen(PORT, () => console.log(`Listening on ${PORT}`));
 
 io.on('connection', (socket) => {
 
-    socket.on('join-group', (group_id, state, resolve) => {
-        let group;
-        if (group_id) {
-            assert(typeof group_id == "number", "invalid group_id");
-            group = getGroup(group_id);
+    socket.on('join-game', (game_id, state, resolve) => {
+        let game;
+        if (game_id) {
+            assert(typeof game_id == "number", "invalid game_id");
+            game = getGame(game_id);
         } else {
-            group = new Group;
+            game = new Game;
         }
 
-        if (!group) {
-            console.log('Could not join group ' + group_id)
-            resolve(serverError('Could not join group ' + group_id));
+        if (!game) {
+            console.log('Could not join game ' + game_id)
+            resolve(serverError('Could not join game ' + game_id));
             return;
         }
 
-        group.mergeState(state);
+        game.mergeState(state);
 
 
-        let player = new Player(socket, group);
-        player.broadcastToGroup('player joined');
+        let player = new Player(socket, game);
+        player.broadcastToGame('player joined');
 
         resolve({
             player_id: player.id(),
-            group_id: group.id(),
-            group_state: group.state()
+            game_id: game.id(),
+            game_state: game.state()
         });
     });
 
     socket.on('disconnect', data => {
         let player = getPlayerUnchecked(socket);
         if (player) {
-            player.broadcastToGroup('player left');
+            player.broadcastToGame('player left');
             deletePlayer(player);
         }
     });
 
     socket.on('data', (state, info) => {
         let player = getPlayer(socket);
-        player.group().mergeState(state);
+        player.game().mergeState(state);
 
-        player.broadcastToGroup('data', {
+        player.broadcastToGame('data', {
             state: state,
             info: info,
         });
@@ -70,7 +70,7 @@ io.on('connection', (socket) => {
 
 
 let players = new Map; // Map socket ID to Player
-let groups = new Map; // Map group ID to Group
+let games = new Map; // Map game ID to Game
 
 function serverError(message)
 {
@@ -98,13 +98,13 @@ function get_player_id() {
 }
 
 class Player {
-    constructor(socket, group) {
+    constructor(socket, game) {
         assert(socket, "Socket not supplied");
-        assert(group instanceof Group, "Invalid group");
+        assert(game instanceof Game, "Invalid game");
 
         this.m_socket = socket;
-        this.m_group = group;
-        this.m_socket.join(group.room());
+        this.m_game = game;
+        this.m_socket.join(game.room());
 
         this.m_id = get_player_id();
 
@@ -117,56 +117,56 @@ class Player {
         return this.m_id;
     }
 
-    group() {
-        return this.m_group;
+    game() {
+        return this.m_game;
     }
 
     socket() {
         return this.m_socket;
     }
 
-    broadcastToGroup(channel, data) {
+    broadcastToGame(channel, data) {
         if (data == undefined) {
             data = {};
         }
         assert(typeof data == "object");
         data.player_id = this.id();
-        const room = this.group().room();
+        const room = this.game().room();
         this.socket().broadcast.to(room).emit(channel, data);
     }
 }
 
 function deletePlayer(player) {
     console.log("Deleting player " + player.id());
-    let group = player.group();
+    let game = player.game();
 
     assert(players.has(player.socket()))
     players.delete(player.socket());
 
-    if(group.members().length == 0) {
-        console.log("Deleting group ", group.id());
-        groups.delete(group.id());
+    if(game.members().length == 0) {
+        console.log("Deleting game ", game.id());
+        games.delete(game.id());
     }
 }
 
 // Generate 6 digit random ID which is not already in use.
-function unusedGroupId() {
+function unusedGameId() {
     // Implementation is a kludge.
     const retry_limit = 10; // arbitrary
     for (let i = 0; i < retry_limit; ++i) {
         let candidate = Math.round(Math.random() * 1000000);
-        if (!groups.has(candidate)) {
+        if (!games.has(candidate)) {
             return candidate;
         }
     }
-    assert(false, "Failed to get used group ID");
+    assert(false, "Failed to get used game ID");
 }
 
-class Group {
+class Game {
     constructor() {
-        this.m_id = unusedGroupId();
-        console.log("Adding group ", this.m_id);
-        groups.set(this.m_id, this);
+        this.m_id = unusedGameId();
+        console.log("Adding game ", this.m_id);
+        games.set(this.m_id, this);
 
         this.m_state = {};
     }
@@ -189,10 +189,10 @@ class Group {
         return 'room' + this.id();
     }
 
-    // Return array of players in this group (ineffient)
+    // Return array of players in this game (ineffient)
     members() {
         let player_array = new Array(...players.values())
-        return player_array.filter(p => p.group() == this);
+        return player_array.filter(p => p.game() == this);
     }
 }
 
@@ -202,13 +202,13 @@ function getPlayerUnchecked(socket) {
 function getPlayer(socket) {
     let player = getPlayerUnchecked(socket);
     assert(player, "Player not found");
-    assert(player.group(), "Player does not have group");
+    assert(player.game(), "Player does not have game");
     assert(player.id(), "Player does not have id");
     return player;
 }
 
-function getGroup(group_id) {
-    return groups.get(group_id);
+function getGame(game_id) {
+    return games.get(game_id);
 }
 
 
