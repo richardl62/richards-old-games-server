@@ -39,6 +39,15 @@ app.post('/start-game', function (req, res) {
     res.json(st_res);
 });
 
+// Kludge: Should not be a get
+app.get('/clear', function (req, res) {
+    const id = req.body.id;
+    const game = req.body.game;
+
+    clearGames();
+    res.json(true);
+});
+
 io.on('connection', (socket) => {
 
     socket.on('join-game', (game_id, state, resolve) => {
@@ -247,6 +256,10 @@ function startGame(id, game) {
 
     new Game(id, game);
     return true;
+}
+
+function clearGames() {
+    games.clear();
 }
 
 
