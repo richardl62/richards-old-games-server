@@ -5,6 +5,7 @@ var app = express();
 var http = require('http').createServer(app);
 var io = require('socket.io')(http);
 var bodyParser = require('body-parser');
+const { start } = require('repl');
 
 const PORT = process.env.PORT || 5000;
 
@@ -23,7 +24,7 @@ app.use(function(req, res, next) {
 app.use(express.static('public'));
 
 
-app.get('/open-games', function (req, res) {
+app.post('/open-games', function (req, res) {
     let data = []; 
     for(let [id,game] of games) {
         data.push([id,game.type()]);
@@ -32,15 +33,23 @@ app.get('/open-games', function (req, res) {
 });
 
 app.post('/start-game', function (req, res) {
-    const id = req.body.id;
+    let id = req.body.id;
     const game = req.body.game;
 
-    let st_res = startGame(id,game);
-    res.json(st_res);
+    if (id === undefined) {
+        id = pick_unused_id()
+    }
+
+    if(gameExists(id)) { // Unnnecessary if pick_usused_id() was called
+        res.json({error: `Game ${id} aleady exists`})
+    } else {     
+        startGame(id, game);
+        res.json({id: id});
+    }
 });
 
 // Kludge: Should not be a get
-app.get('/clear', function (req, res) {
+app.post('/clear', function (req, res) {
     const id = req.body.id;
     const game = req.body.game;
 
@@ -245,14 +254,27 @@ function getPlayer(socket) {
     return player;
 }
 
-function startGame(id, game) {
-    if(!id || !game) {
-        return Error("id and/or game are not defined");
-    }
+function gameExists(id) {
+    return games.has(id);
+}
 
-    if(games.has(id)) {
-        return Error(`game "${id}" already exists`);
+function pick_unused_id() {
+    let id = Math.ceil(Math.random() * 10000)
+    for(let i = 0; i < 1000 /* arbitrary */; i++) {
+        let s = (id+i).toString();
+        if(!games.has(s)) {
+            return s;
+        }
     }
+    throw new Error("Could pick unused game id");
+}
+
+function startGame(id, game) {
+    console.log("id=",id, "game=", game)
+
+    assert(typeof id == "string")
+    assert(typeof game == "string")
+    assert(!games.has(id));
 
     new Game(id, game);
     return true;
