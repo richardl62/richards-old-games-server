@@ -26,8 +26,8 @@ app.use(express.static('public'));
 
 app.post('/open-games', function (req, res) {
     let data = []; 
-    for(let [id,game] of games) {
-        data.push([id,game.type()]);
+    for (let [id, game] of games) {
+        data.push([id, game.type()]);
     }
     res.json(data);
 });
@@ -40,11 +40,11 @@ app.post('/start-game', function (req, res) {
         id = pick_unused_id()
     }
 
-    if(gameExists(id)) { // Unnnecessary if pick_usused_id() was called
-        res.json({error: `Game ${id} aleady exists`})
-    } else {     
+    if (gameExists(id)) { // Unnnecessary if pick_usused_id() was called
+        res.json({ error: `Game ${id} aleady exists` })
+    } else {
         startGame(id, game);
-        res.json({id: id});
+        res.json({ id: id });
     }
 });
 
@@ -58,33 +58,34 @@ app.post('/clear', function (req, res) {
 });
 
 io.on('connection', (socket) => {
-
-    socket.on('join-game', (game_id, state, resolve) => {
-        let game;
-        if (game_id) {
-            assert(typeof game_id == "number", "invalid game_id");
-            game = getGame(game_id);
-        } else {
-            game = new Game;
-        }
-
-        if (!game) {
-            console.log('Could not join game ' + game_id)
+    //console.log(`connection requested`, socket);
+    console.log(`Connecting`);
+    
+    socket.on('join-game', (game_id, resolve) => {
+        console.log(`join-game requested recieved: game_id=${game_id}`);
+        if (typeof game_id != "string" || game_id == '') {
             resolve(serverError('Could not join game ' + game_id));
             return;
         }
 
-        game.mergeState(state);
-
+        let game = getGame(game_id);
+        if (!game) {
+            resolve(serverError('Could not join game ' + game_id));
+            return;
+        }
 
         let player = new Player(socket, game);
         player.broadcastToGame('player joined');
 
-        resolve({
+
+        console.log(`player ${player.id()} has joined game ${game.id()}`);
+
+        const status = {
             player_id: player.id(),
             game_id: game.id(),
-            game_state: game.state()
-        });
+            state: game.state(),
+        }
+        resolve(status);
     });
 
     socket.on('disconnect', data => {
@@ -114,9 +115,10 @@ io.on('connection', (socket) => {
 let players = new Map; // Map socket ID to Player
 let games = new Map; // Map game ID to Game
 
-function serverError(message)
+function serverError(err)
 {
-    return {server_error: message};
+    console.log("Error reported: ", err)
+    return {server_error: err};
 }
 
 function assert(condition, message) {
@@ -185,10 +187,10 @@ function deletePlayer(player) {
     assert(players.has(player.socket()))
     players.delete(player.socket());
 
-    if(game.members().length == 0) {
-        console.log("Deleting game ", game.id());
-        games.delete(game.id());
-    }
+    // if(game.members().length == 0) {
+    //     console.log("Deleting game ", game.id());
+    //     games.delete(game.id());
+    // }
 }
 
 // Generate 6 digit random ID which is not already in use.
@@ -269,6 +271,11 @@ function pick_unused_id() {
     throw new Error("Could pick unused game id");
 }
 
+function getGame(id) {
+    assert(typeof id == "string");
+    return games.get(id);
+}
+
 function startGame(id, game) {
     console.log("id=",id, "game=", game)
 
@@ -276,8 +283,7 @@ function startGame(id, game) {
     assert(typeof game == "string")
     assert(!games.has(id));
 
-    new Game(id, game);
-    return true;
+    return new Game(id, game);
 }
 
 function clearGames() {
