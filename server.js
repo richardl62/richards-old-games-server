@@ -96,6 +96,14 @@ io.on('connection', (socket) => {
         }
     });
 
+    socket.on('action', action => {
+        let player = getPlayer(socket);
+        player.game().mergeState(action.state);
+
+        player.broadcastToGame('action', action);
+    });
+
+    // DEPRECATED: Prefer 'action'
     socket.on('data', (state, info) => {
         let player = getPlayer(socket);
         player.game().mergeState(state);
