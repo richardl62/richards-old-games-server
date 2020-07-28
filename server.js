@@ -96,14 +96,19 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('action', action => {
+    socket.on('state', state => {
         let player = getPlayer(socket);
-        player.game().mergeState(action.state);
+        player.game().mergeState(state);
 
-        player.broadcastToGame('action', action);
+        let server_info = {
+            player_id: player.id(),
+        };
+        player.broadcastToGame('state', {
+            state: state, 
+            server_info: server_info});
     });
 
-    // DEPRECATED: Prefer 'action'
+    // DEPRECATED: Prefer 'state'
     socket.on('data', (state, info) => {
         let player = getPlayer(socket);
         player.game().mergeState(state);
