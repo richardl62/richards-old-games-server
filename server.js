@@ -44,6 +44,7 @@ app.post('/start-game', function (req, res) {
         res.json({ error: `Game ${id} aleady exists` })
     } else {
         startGame(id, game);
+        console.log("game stared", game, id);
         res.json({ id: id });
     }
 });
@@ -61,10 +62,20 @@ io.on('connection', (socket) => {
     //console.log(`connection requested`, socket);
     console.log(`Connecting`);
     
-    socket.on('join-game', (game_id, resolve) => {
-        console.log(`join-game requested recieved: game_id=${game_id}`);
+    // Join game with the given id.
+    socket.on('join-game', (args, resolve) => {
+        const game_id = args.id;
+        const game_state = args.state;
+
+        console.log(`join-game: requested received - id=${game_id}`);
+
         if (typeof game_id != "string" || game_id == '') {
-            resolve(serverError('Could not join game ' + game_id));
+            resolve(serverError('Invalid game id' + game_id));
+            return;
+        }
+
+        if (typeof game_state != "object") {
+            resolve(serverError('Invalid state' + game_state));
             return;
         }
 
@@ -77,13 +88,20 @@ io.on('connection', (socket) => {
         let player = new Player(socket, game);
         player.broadcastToGame('player joined');
 
+        const game_in_progress = Boolean(game.state());
+        if(!game_in_progress) {
+            console.log(`join-game: first join - using suppied state`, game_state);
+            game.state(game_state)
+        }
+
+
 
         console.log(`player ${player.id()} has joined game ${game.id()}`);
 
         const status = {
             player_id: player.id(),
             game_id: game.id(),
-            state: game.state(),
+            state: game_in_progress ? game.state() : null,
         }
         resolve(status);
     });
@@ -224,7 +242,7 @@ class Game {
         assert(id && type);
         this.m_id = id;
         this.m_type = type;
-        this.m_state = {};
+        this.m_state = null;
 
         games.set(id, this);
     }
@@ -243,8 +261,12 @@ class Game {
         return this.m_type;
     }
 
-    state() {
-        return this.m_state;
+    state(state_) {
+        if(state_ === undefined) {
+            return this.m_state;
+        } else {
+            this.m_state = state_;
+        }
     }
 
     room() {
