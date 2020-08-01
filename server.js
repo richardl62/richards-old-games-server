@@ -160,18 +160,20 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('state', state => {
+    socket.on('state', data => {
+        const state = data.state;
+
         try {
             let player = getPlayer(socket);
-            player.game().mergeState(state);
+            if (state) {
+                player.game().mergeState(state);
+            }
 
             let server_info = {
                 player_id: player.id(),
             };
-        player.broadcastToGame('state', {
-            state: state,
-            server_info: server_info,
-            });
+        player.broadcastToGame('state', Object.assign(data, {server_info: server_info}));
+
         } catch (err) {
             process_socket_exception(this, err);
         }
