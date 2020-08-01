@@ -7,6 +7,24 @@ var io = require('socket.io')(http);
 var bodyParser = require('body-parser');
 const PORT = process.env.PORT || 5000;
 
+function serverError(err) {
+    console.log("Error reported: ", err)
+    return { server_error: err };
+}
+
+function serverException(err) {
+    console.log("Exception caught: ", err)
+    return { server_error: err.message };
+}
+
+function assert(condition, message) {
+    if (!condition) {
+        let err = Error("Assertion failed: " + message);
+        console.log(err);
+        throw err;
+    }
+}
+
 http.listen(PORT, () => console.log(`Listening on ${PORT}`));
 
 app.use(bodyParser.urlencoded({ extended: false }))
@@ -23,50 +41,63 @@ app.use(express.static('public'));
 
 
 app.post('/open-games', function (req, res) {
-    let data = [];
-    for (let [id, game] of games) {
-        data.push([id, game.type()]);
+    try {
+        let data = [];
+        for (let [id, game] of games) {
+            data.push([id, game.type()]);
+        }
+        res.json(data);
+    } catch (err) {
+        res.json(serverException(err.message));
     }
-    res.json(data);
 });
 
 app.post('/start-game', function (req, res) {
-    let id = req.body.id;
-    const game = req.body.game;
+    try {
+        let id = req.body.id;
+        const game = req.body.game;
 
-    if (id === undefined) {
-        id = pick_unused_id()
-    }
+        if (id === undefined) {
+            id = pick_unused_id()
+        }
 
-    if (gameExists(id)) { // Unnnecessary if pick_usused_id() was called
-        res.json({ error: `Game ${id} aleady exists` })
-    } else {
-        startGame(id, game);
-        console.log("game stared", game, id);
-        res.json({ id: id });
+        if (gameExists(id)) { // Unnnecessary if pick_usused_id() was called
+            res.json({ error: `Game ${id} aleady exists` })
+        } else {
+            startGame(id, game);
+            res.json({ id: id });
+        }
+    } catch (err) {
+        res.json(serverException(err.message));
     }
 });
 
 // Kludge: Should not be a get
 app.post('/clear', function (req, res) {
-    const id = req.body.id;
-    const game = req.body.game;
+    try {
+        const id = req.body.id;
+        const game = req.body.game;
 
-    clearAll();
-    res.json(true);
+        clearAll();
+        res.json(true);
+    } catch (err) {
+        res.json(serverException(err.message));
+    }
 });
 
 function process_socket_exception(socket, err) {
-    console.log("Exception caught", err);
-    let player = getPlayerUnchecked(socket);
-    if(player) {
-        const game = player.game();
-        game.emit('server-error', err.message);
+    try {
+        let player = getPlayerUnchecked(socket);
+        if (player) {
+            const game = player.game();
+            game.emit('server-error', err.message);
+        }
+    } catch (err) {
+        res.json(serverException(err.message));
     }
 }
 
 io.on('connection', (socket) => {
-    //console.log(`connection requested`, socket);
     console.log(`Connecting`);
 
     // Join game with the given id.
@@ -96,19 +127,23 @@ io.on('connection', (socket) => {
             let player = new Player(socket, game);
             player.broadcastToGame('player joined');
 
+            let log_message = `player ${player.id()} has joined game ${game.id()}`;
             const game_in_progress = Boolean(game.state());
             if (!game_in_progress) {
-                console.log(`join-game: first join - using suppied state`, game_state);
+                console.log(`join-game: first join - using suppied state`);
                 game.state(game_state)
+                log_message += " (first join)";
             }
 
-            console.log(`player ${player.id()} has joined game ${game.id()}`);
+            console.log(log_message);
 
             const status = {
                 player_id: player.id(),
                 game_id: game.id(),
                 state: game_in_progress ? game.state() : null,
             }
+
+            resolve(status);
         } catch (err) {
             process_socket_exception(this, err);
         }
@@ -118,8 +153,7 @@ io.on('connection', (socket) => {
         try {
             let player = getPlayerUnchecked(socket);
             if (player) {
-            player.broadcastToGame('player left');
-                deletePlayer(player);
+                player.broadcastToGame('player left');
             }
         } catch (err) {
             process_socket_exception(this, err);
@@ -167,18 +201,6 @@ io.on('connection', (socket) => {
 let players = new Map; // Map socket ID to Player
 let games = new Map; // Map game ID to Game
 
-function serverError(err) {
-    console.log("Error reported: ", err)
-    return { server_error: err };
-}
-
-function assert(condition, message) {
-    if (!condition) {
-        let err = Error("Assertion failed: " + message);
-        console.log(err);
-        throw err;
-    }
-}
 
 var next_player_id = 1;
 function get_player_id() {
@@ -231,27 +253,19 @@ class Player {
     }
 
     destroy() {
-        const id = this.id();
-        console("Destroying player", id, players[id], this);
-        assert(players[id] == this, "Inconsistent data of player " + id);
-        if(this.m_socket) {
-            this.m_socket.disconnect();
+        const socket = this.m_socket;
+        if(socket) {
+            console.log("Deleting player " + this.id());
+
+            socket.disconnect();
+
+            assert(players.has(socket));
+            players.delete(socket);
+
+            
+            this.m_socket = null;
         }
-        delete players[id];
     }
-}
-
-function deletePlayer(player) {
-    console.log("Deleting player " + player.id());
-    let game = player.game();
-
-    assert(players.has(player.socket()))
-    players.delete(player.socket());
-
-    // if(game.members().length == 0) {
-    //     console.log("Deleting game ", game.id());
-    //     games.delete(game.id());
-    // }
 }
 
 // Generate 6 digit random ID which is not already in use.
@@ -362,7 +376,7 @@ function getGame(id) {
 }
 
 function startGame(id, game) {
-    console.log("id=", id, "game=", game)
+    console.log("Starting game: id=", id, "game=", game)
 
     assert(typeof id == "string")
     assert(typeof game == "string")
@@ -373,11 +387,11 @@ function startGame(id, game) {
 
 function clearAll() {
     console.log("Clearing all players and games");
-    for(let [id, player] of games) {
-        player.destroy(); 
+    for(let [id, player] of players) {
+        player.destroy();
     }
-
-    games.clear(); // KLUDGE
+   
+    games.clear(); // kludge
 }
 
 
