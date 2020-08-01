@@ -5,8 +5,6 @@ var app = express();
 var http = require('http').createServer(app);
 var io = require('socket.io')(http);
 var bodyParser = require('body-parser');
-const { start } = require('repl');
-
 const PORT = process.env.PORT || 5000;
 
 http.listen(PORT, () => console.log(`Listening on ${PORT}`));
@@ -14,18 +12,18 @@ http.listen(PORT, () => console.log(`Listening on ${PORT}`));
 app.use(bodyParser.urlencoded({ extended: false }))
 app.use(bodyParser.json())
 
-app.use(function(req, res, next) {
+app.use(function (req, res, next) {
     res.header("Access-Control-Allow-Origin", "*"); // Bad for security!!!
     res.header("Access-Control-Allow-Headers", "*"); // Bad for security!!!
-    
+
     next();
-  });
+});
 
 app.use(express.static('public'));
 
 
 app.post('/open-games', function (req, res) {
-    let data = []; 
+    let data = [];
     for (let [id, game] of games) {
         data.push([id, game.type()]);
     }
@@ -54,87 +52,110 @@ app.post('/clear', function (req, res) {
     const id = req.body.id;
     const game = req.body.game;
 
-    clearGames();
+    clearAll();
     res.json(true);
 });
+
+function process_socket_exception(socket, err) {
+    console.log("Exception caught", err);
+    let player = getPlayerUnchecked(socket);
+    if(player) {
+        const game = player.game();
+        game.emit('server-error', err.message);
+    }
+}
 
 io.on('connection', (socket) => {
     //console.log(`connection requested`, socket);
     console.log(`Connecting`);
-    
+
     // Join game with the given id.
     socket.on('join-game', (args, resolve) => {
-        const game_id = args.id;
-        const game_state = args.state;
+        try {
+            const game_id = args.id;
+            const game_state = args.state;
 
-        console.log(`join-game: requested received - id=${game_id}`);
+            console.log(`join-game: requested received - id=${game_id}`);
 
-        if (typeof game_id != "string" || game_id == '') {
-            resolve(serverError('Invalid game id' + game_id));
-            return;
+            if (typeof game_id != "string" || game_id == '') {
+                resolve(serverError('Invalid game id' + game_id));
+                return;
+            }
+
+            if (typeof game_state != "object") {
+                resolve(serverError('Invalid state' + game_state));
+                return;
+            }
+
+            let game = getGame(game_id);
+            if (!game) {
+                resolve(serverError('Could not join game ' + game_id));
+                return;
+            }
+
+            let player = new Player(socket, game);
+            player.broadcastToGame('player joined');
+
+            const game_in_progress = Boolean(game.state());
+            if (!game_in_progress) {
+                console.log(`join-game: first join - using suppied state`, game_state);
+                game.state(game_state)
+            }
+
+            console.log(`player ${player.id()} has joined game ${game.id()}`);
+
+            const status = {
+                player_id: player.id(),
+                game_id: game.id(),
+                state: game_in_progress ? game.state() : null,
+            }
+        } catch (err) {
+            process_socket_exception(this, err);
         }
-
-        if (typeof game_state != "object") {
-            resolve(serverError('Invalid state' + game_state));
-            return;
-        }
-
-        let game = getGame(game_id);
-        if (!game) {
-            resolve(serverError('Could not join game ' + game_id));
-            return;
-        }
-
-        let player = new Player(socket, game);
-        player.broadcastToGame('player joined');
-
-        const game_in_progress = Boolean(game.state());
-        if(!game_in_progress) {
-            console.log(`join-game: first join - using suppied state`, game_state);
-            game.state(game_state)
-        }
-
-
-
-        console.log(`player ${player.id()} has joined game ${game.id()}`);
-
-        const status = {
-            player_id: player.id(),
-            game_id: game.id(),
-            state: game_in_progress ? game.state() : null,
-        }
-        resolve(status);
     });
 
     socket.on('disconnect', data => {
-        let player = getPlayerUnchecked(socket);
-        if (player) {
+        try {
+            let player = getPlayerUnchecked(socket);
+            if (player) {
             player.broadcastToGame('player left');
-            deletePlayer(player);
+                deletePlayer(player);
+            }
+        } catch (err) {
+            process_socket_exception(this, err);
         }
     });
 
     socket.on('state', state => {
-        let player = getPlayer(socket);
-        player.game().mergeState(state);
+        try {
+            let player = getPlayer(socket);
+            player.game().mergeState(state);
 
-        let server_info = {
-            player_id: player.id(),
-        };
+            let server_info = {
+                player_id: player.id(),
+            };
         player.broadcastToGame('state', {
-            state: state, 
-            server_info: server_info});
+            state: state,
+            server_info: server_info,
+            });
+        } catch (err) {
+            process_socket_exception(this, err);
+        }
     });
 
     // DEPRECATED: Prefer 'state'
     socket.on('data', (state, info) => {
-        let player = getPlayer(socket);
-        player.game().mergeState(state);
+        try {
+            let player = getPlayer(socket);
+            player.game().mergeState(state);
 
         player.broadcastToGame('data', {
-            state: state,
-            info: info,
-        });
+                state: state,
+                info: info,
+            });
+        } catch (err) {
+            process_socket_exception(this, err);
+        }
     });
 })
 
@@ -146,10 +167,9 @@ io.on('connection', (socket) => {
 let players = new Map; // Map socket ID to Player
 let games = new Map; // Map game ID to Game
 
-function serverError(err)
-{
+function serverError(err) {
     console.log("Error reported: ", err)
-    return {server_error: err};
+    return { server_error: err };
 }
 
 function assert(condition, message) {
@@ -209,6 +229,16 @@ class Player {
         const room = this.game().room();
         this.socket().broadcast.to(room).emit(channel, data);
     }
+
+    destroy() {
+        const id = this.id();
+        console("Destroying player", id, players[id], this);
+        assert(players[id] == this, "Inconsistent data of player " + id);
+        if(this.m_socket) {
+            this.m_socket.disconnect();
+        }
+        delete players[id];
+    }
 }
 
 function deletePlayer(player) {
@@ -262,7 +292,7 @@ class Game {
     }
 
     state(state_) {
-        if(state_ === undefined) {
+        if (state_ === undefined) {
             return this.m_state;
         } else {
             this.m_state = state_;
@@ -278,6 +308,26 @@ class Game {
         let player_array = new Array(...players.values())
         return player_array.filter(p => p.game() == this);
     }
+
+    // Send to all players in room
+    emit(channel, data) {
+        const room = this.game().room();
+        io.to('room1').emit(channel, data);
+    }
+
+    // // Discoonect all users
+    // disconnect() {
+    //     console.log("Disconnecting game", this.id());
+    //     const room = this.room();
+    //     // Adapted from 
+    //     // https://stackoverflow.com/questions/43296140/disconnect-all-users-in-sockect-io-room
+    //     io.of('/').in(room).clients((error, clients) => {
+    //         if (error) throw error;
+    //         for (var i = 0; i < clients.length; i++) {
+    //             io.sockets.connected[clients[i]].disconnect(true)
+    //         }
+    //     });
+    // }
 }
 
 function getPlayerUnchecked(socket) {
@@ -297,9 +347,9 @@ function gameExists(id) {
 
 function pick_unused_id() {
     let id = Math.ceil(Math.random() * 10000)
-    for(let i = 0; i < 1000 /* arbitrary */; i++) {
-        let s = (id+i).toString();
-        if(!games.has(s)) {
+    for (let i = 0; i < 1000 /* arbitrary */; i++) {
+        let s = (id + i).toString();
+        if (!games.has(s)) {
             return s;
         }
     }
@@ -312,7 +362,7 @@ function getGame(id) {
 }
 
 function startGame(id, game) {
-    console.log("id=",id, "game=", game)
+    console.log("id=", id, "game=", game)
 
     assert(typeof id == "string")
     assert(typeof game == "string")
@@ -321,8 +371,13 @@ function startGame(id, game) {
     return new Game(id, game);
 }
 
-function clearGames() {
-    games.clear();
+function clearAll() {
+    console.log("Clearing all players and games");
+    for(let [id, player] of games) {
+        player.destroy(); 
+    }
+
+    games.clear(); // KLUDGE
 }
 
 
