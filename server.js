@@ -8,12 +8,12 @@ var bodyParser = require('body-parser');
 const PORT = process.env.PORT || 5000;
 
 function serverError(err) {
-    console.log("Error reported: ", err)
+    console.log("Error reported: ", err);
     return { server_error: err };
 }
 
 function serverException(err) {
-    console.log("Exception caught: ", err)
+    console.log("Exception caught: ", err);
     return { server_error: err.message };
 }
 
@@ -27,7 +27,7 @@ function assert(condition, message) {
 
 http.listen(PORT, () => console.log(`Listening on ${PORT}`));
 
-app.use(bodyParser.urlencoded({ extended: false }))
+app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json())
 
 app.use(function (req, res, next) {
@@ -52,24 +52,47 @@ app.post('/open-games', function (req, res) {
     }
 });
 
+// Start a game if  does not already exist.
+// Return {
+//   id: <game id>
+//}
+//
 app.post('/start-game', function (req, res) {
+    let client_data = null;
+
     try {
         let id = req.body.id;
-        const game = req.body.game;
+        const game_type = req.body.game;
 
-        if (id === undefined) {
-            id = pick_unused_id()
+        //console.log(`/start-game: id="${id}" game_type="${game_type}"`);
+
+        if (!id) {
+            id = pick_unused_id();
+            //console.log(`/start-game: id set to "${id}"`);
         }
 
-        if (gameExists(id)) { // Unnnecessary if pick_usused_id() was called
-            res.json({ error: `Game ${id} aleady exists` })
-        } else {
-            startGame(id, game);
-            res.json({ id: id });
+        assert(typeof id == "string");
+        
+        let existing_game = getGame(id); // inefficient if id was originally unset
+        client_data = {
+            id: id,
+            previouslyStarted: Boolean(existing_game),
+        };
+
+        if (existing_game && existing_game.type() != game_type) {
+            client_data = serverException(`Inconsisent game types: "${existing_game.type()}" vs "${game_type}"`);
         }
+        
+        if(!existing_game) {
+            startGame(id, game_type);
+        }
+
     } catch (err) {
-        res.json(serverException(err.message));
+        client_data = serverException(err.message);
     }
+
+    console.log("/start-game client data", client_data);
+    res.json(client_data);
 });
 
 // Kludge: Should not be a get
@@ -380,9 +403,9 @@ function getGame(id) {
 function startGame(id, game) {
     console.log("Starting game: id=", id, "game=", game)
 
-    assert(typeof id == "string")
-    assert(typeof game == "string")
-    assert(!games.has(id));
+    assert(typeof id == "string", "bad ID");
+    assert(typeof game == "string", "bad Game type");
+    assert(!games.has(id), "game id already defined");
 
     return new Game(id, game);
 }
